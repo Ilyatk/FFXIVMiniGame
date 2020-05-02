@@ -101,6 +101,12 @@ namespace MiniGameBot
 
         };
 
+        private Dictionary<uint, string> homeMachines = new Dictionary<uint, string> {
+                {197283, "Crystal Tower Striker" },
+                {197370, "Cuff-a-Cur" },
+                {197369, "Monster Toss" }
+            };
+
         public string SelectedGame
         {
             get
@@ -157,6 +163,16 @@ namespace MiniGameBot
             }
         }
 
+        public void LogError(string format, params object[] args)
+        {
+            Logging.Write(Colors.Red, LoggerPrefix + string.Format(format, args));
+        }
+
+        public void LogError(string message)
+        {
+            Logging.Write(Colors.Red, LoggerPrefix + message);
+        }
+
         public void Log(string format, params object[] args)
         {
             Logging.Write(Colors.SandyBrown, LoggerPrefix + string.Format(format, args));
@@ -181,26 +197,67 @@ namespace MiniGameBot
             }
         }
 
-        public override void Start()
+        private MiniGameConfig GetGameConfig()
         {
-            FinalizedPath = null;
-            findPathRequested = false;
-            playCount = 0;
-            statistic.Reset();
+            // INFO For game machine in private homes.
+            GameObject closestMachine = GameObjectManager.GameObjects
+                .Where(o => homeMachines.ContainsKey(o.NpcId) && o.IsVisible && o.IsTargetable)
+                .OrderBy(p => p.Distance(Core.Me.Location))
+                .FirstOrDefault();
+
+            if (closestMachine != null)
+            {
+                string machineName = homeMachines[closestMachine.NpcId];
+                if (availableConfigs.ContainsKey(machineName))
+                {
+                    MiniGameConfig availableConfig = availableConfigs[machineName];
+
+                    MiniGameConfig result = new MiniGameConfig(
+                        availableConfig.WindowName,
+                        availableConfig.Strategy,
+                        new List<Npc> {
+                            new Npc(closestMachine.NpcId, WorldManager.ZoneId, closestMachine.Location)
+                        }
+                    );
+
+                    // Skip navigation path generation.
+                    findPathRequested = true;
+                    FinalizedPath = new Queue<NavGraph.INode>();
+                    FinalizedPath.Enqueue(new NavGraph.PointNode
+                    {
+                        Id = closestMachine.NpcId,
+                        ZoneId = WorldManager.ZoneId,
+                        Location = closestMachine.Location
+                    });
+
+                    return result;
+                }
+            }
 
             if (!availableConfigs.ContainsKey(SelectedGame))
+                return null;
+
+            return this.availableConfigs[SelectedGame];
+        }
+        public override void Start()
+        {
+            ResetBotState();
+
+            var config = this.GetGameConfig();
+            if (config == null)
             {
+                LogError("Wrong config.");
                 TreeRoot.Stop();
                 return;
             }
+               
 
-            var config = availableConfigs[SelectedGame];
             var npcList = config.Npcs;
-
             Strategy = config.Strategy;
 
             if (npcList == null || npcList.Count == 0)
             {
+                LogError("Wrong config. Npc isn't defined.");
                 TreeRoot.Stop();
                 return;
             }
@@ -217,6 +274,14 @@ namespace MiniGameBot
             Navigator.PlayerMover = new SlideMover();
 
             Log("Starting.");
+        }
+
+        private void ResetBotState()
+        {
+            FinalizedPath = null;
+            findPathRequested = false;
+            playCount = 0;
+            statistic.Reset();
         }
 
         public override void Stop()
